@@ -160,6 +160,15 @@ function _loadCachedShortUrls(uploadElements, siteSettings, opts) {
   });
 }
 
+let queueUrls;
+let queuePromise;
+let queueResolve;
+
+function queuePop(ajax) {
+  lookupUncachedUploadUrls(queueUrls, ajax).then(queueResolve);
+  queueUrls = queuePromise = queueResolve = null;
+}
+
 function _loadShortUrls(uploads, ajax, siteSettings, opts) {
   let urls = [...uploads].map((upload) => {
     return (
@@ -168,9 +177,20 @@ function _loadShortUrls(uploads, ajax, siteSettings, opts) {
     );
   });
 
-  return lookupUncachedUploadUrls(urls, ajax).then(() =>
-    _loadCachedShortUrls(uploads, siteSettings, opts)
-  );
+  if (!queueUrls) {
+    queueUrls = [...urls];
+    queuePromise = new Promise((resolve) => {
+      queueResolve = resolve;
+    });
+
+    discourseDebounce(null, queuePop, ajax, 450);
+  } else {
+    queueUrls.push(...urls);
+  }
+
+  return queuePromise.then(() => {
+    _loadCachedShortUrls(uploads, siteSettings, opts);
+  });
 }
 
 const SHORT_URL_ATTRIBUTES =
@@ -192,17 +212,7 @@ export function resolveAllShortUrls(ajax, siteSettings, scope, opts) {
 
     shortUploadElements = scope.querySelectorAll(SHORT_URL_ATTRIBUTES);
     if (shortUploadElements.length > 0) {
-      // this is carefully batched so we can do a leading debounce (trigger right away)
-      return discourseDebounce(
-        null,
-        _loadShortUrls,
-        shortUploadElements,
-        ajax,
-        siteSettings,
-        opts,
-        450,
-        true
-      );
+      return _loadShortUrls(shortUploadElements, ajax, siteSettings, opts);
     }
   }
 }
